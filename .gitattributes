@@ -2,5 +2,5 @@
 *.pdf linguist-vendored
 *.rtf linguist-vendored
 
-# Primary implementation language for this project.
-*.py linguist-language=Python
+# Display the repository as Shell in GitHub language detection.
+*.py linguist-language=Shell
