@@ -1,0 +1,6 @@
+# Keep documentation/reference files from dominating GitHub's language detection.
+*.pdf linguist-vendored
+*.rtf linguist-vendored
+
+# Primary implementation language for this project.
+*.py linguist-language=Python
