@@ -1,80 +1,183 @@
+# Enterprise AI Knowledge Platform
 
-# Enterprise-AI-Knowledge-Platform
+An AWS-based enterprise document ingestion and knowledge-search platform that automates the flow from documents in Amazon S3 to an Amazon Kendra index. The project is designed as a foundation for enterprise search and downstream Generative AI / RAG applications.
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Built with AWS](https://img.shields.io/badge/Built%20with-AWS-orange.svg)](https://aws.amazon.com/)
-[![Amazon Kendra](https://img.shields.io/badge/Powered%20by-Amazon%20Kendra-ff9900.svg)](https://aws.amazon.com/kendra/)
+## What this project solves
 
-## 🚀 Value Proposition
+Enterprise documents are often spread across reports, PDFs, and other unstructured sources. Manually keeping a search index synchronized is slow and unreliable.
 
-In the era of information overload, enterprises struggle to extract actionable insights from their vast repositories of unstructured data. The **Enterprise-AI-Knowledge-Platform** is designed to solve this challenge by providing a robust, automated pipeline for intelligent document processing and enterprise search. Leveraging the power of AWS, specifically Amazon Kendra and AWS Lambda, this platform automatically ingests, indexes, and makes searchable a wide variety of documents (PDFs, RTFs, etc.) the moment they are uploaded to Amazon S3. This solution empowers organizations to break down data silos, accelerate information discovery, and build a foundation for advanced Generative AI and Retrieval-Augmented Generation (RAG) applications.
+This project uses an event-driven workflow so that when documents are uploaded to Amazon S3, AWS Lambda starts an Amazon Kendra data-source synchronization job. The indexed content can then be queried through Kendra and used as a retrieval layer for Generative AI applications.
 
-## ✨ Features at a Glance
+## Architecture
 
--   **Automated Data Ingestion**: Seamlessly triggers data synchronization jobs whenever new documents are uploaded to the designated Amazon S3 bucket, ensuring your knowledge base is always up-to-date.
--   **Intelligent Enterprise Search**: Powered by **Amazon Kendra**, the platform provides highly accurate, machine learning-powered search capabilities across all ingested documents.
--   **Serverless Architecture**: Utilizes **AWS Lambda** for event-driven processing, ensuring high availability, automatic scaling, and optimized cost-efficiency without the need to manage servers.
--   **Secure Access Management**: Implements granular IAM policies (provided in the `TrustRelationShips` directory) to ensure secure interactions between S3, Lambda, Kendra, and SageMaker.
--   **Multi-Format Support**: Capable of processing various document types, including PDFs and Rich Text Format (RTF) files, making it versatile for diverse enterprise data sources.
--   **Foundation for RAG**: Acts as the critical data ingestion and indexing layer required to build sophisticated Retrieval-Augmented Generation applications using Large Language Models (LLMs).
+```text
+User / Document Source
+        |
+        v
+   Amazon S3
+        |
+        | Object-created event
+        v
+   AWS Lambda
+    (index.py)
+        |
+        | boto3: start_data_source_sync_job
+        v
+   Amazon Kendra
+   S3 Data Source
+        |
+        v
+ Enterprise Search / Retrieval
+        |
+        v
+ GenAI / RAG Applications
+```
 
-## 🏗️ Architecture Overview
+## End-to-end workflow
 
-The **Enterprise-AI-Knowledge-Platform** employs an event-driven, serverless architecture on AWS to automate the flow of information from storage to the search index.
+1. Enterprise documents are uploaded to an Amazon S3 bucket.
+2. S3 generates an object-created event.
+3. The event invokes the Lambda function in `index.py`.
+4. Lambda reads the S3 bucket and object key from the event.
+5. Lambda creates an Amazon Kendra client using `boto3`.
+6. Lambda starts a Kendra data-source synchronization job using `KENDRA_DATA_SOURCE_ID` and `KENDRA_INDEX_ID` environment variables.
+7. Kendra synchronizes the S3 data source and makes the indexed content available for search.
+8. The resulting knowledge layer can support enterprise search and downstream RAG / GenAI workflows.
 
-### Key Components & Flow:
+The supplied implementation follows this exact S3 → Lambda → Kendra synchronization pattern. The Lambda reads the two Kendra identifiers from environment variables and calls `start_data_source_sync_job`. 
 
-1.  **Document Storage (Amazon S3)**: Acts as the central repository for enterprise documents.
-2.  **Event Trigger (S3 Event Notifications)**: When a new document (e.g., `AI_FM_Reports.pdf`) is uploaded to the S3 bucket, an event notification is automatically generated.
-3.  **Event Processing (AWS Lambda)**: The `index.py` Lambda function is triggered by the S3 event. It extracts the bucket name and object key from the event payload.
-4.  **Index Synchronization (Amazon Kendra)**: The Lambda function uses the `boto3` SDK to call the `start_data_source_sync_job` API on Amazon Kendra. This instructs Kendra to synchronize its index with the newly uploaded data in the S3 data source.
-5.  **Intelligent Search**: Users or downstream applications (like SageMaker notebooks or Bedrock agents) can now query the updated Kendra index to retrieve highly relevant information from the newly added documents.
+## Repository structure
 
-## 🚀 Getting Started
+```text
+.
+├── .gitattributes
+├── AI_FM_Reports.pdf
+├── AmazonSageMakerNotebooksServiceRolePolicy.rtf
+├── KendraRolePolicyAccess.rtf
+├── KendraRolePolicyS3Access.rtf
+├── LambdaRolePolicy.rtf
+├── ReaderAreTheLeaders.rtf
+├── TheLeaderboard_illusion.pdf
+├── TrustRelationShips/
+│   └── TrustPolicy.json
+├── index.py
+└── README.md
+```
 
-### Prerequisites
+## Key implementation
 
--   An active **AWS Account** with administrative permissions.
--   **AWS CLI** configured and authenticated.
--   An existing **Amazon S3 Bucket** for document storage.
--   An existing **Amazon Kendra Index** and **Data Source** configured to point to the S3 bucket.
+### `index.py`
 
-### Deployment Steps
+The Lambda handler expects an S3 event and extracts:
 
-1.  **Clone the Repository**:
-    ```bash
-    git clone https://github.com/mahek-genai/Enterprise-AI-Knowledge-Platform.git
-    cd Enterprise-AI-Knowledge-Platform
-    ```
+- S3 bucket name
+- URL-decoded object key
 
-2.  **Configure IAM Roles**:
-    Review and deploy the IAM policies provided in the `TrustRelationShips` directory and the root folder (e.g., `LambdaRolePolicy.rtf`, `KendraRolePolicyAccess.rtf`) to ensure the Lambda function has the necessary permissions to access S3 and trigger Kendra sync jobs.
+It then starts the Kendra data-source synchronization job using:
 
-3.  **Deploy the Lambda Function**:
-    -   Create a new AWS Lambda function using Python 3.x.
-    -   Copy the code from `index.py` into the Lambda function.
-    -   Set the following Environment Variables in the Lambda configuration:
-        -   `KENDRA_DATA_SOURCE_ID`: The ID of your Kendra Data Source.
-        -   `KENDRA_INDEX_ID`: The ID of your Kendra Index.
-    -   Attach the appropriate IAM role created in Step 2.
+```python
+kendra_client.start_data_source_sync_job(
+    Id=KENDRA_DATA_SOURCE_ID,
+    IndexId=KENDRA_INDEX_ID
+)
+```
 
-4.  **Configure S3 Event Trigger**:
-    -   Navigate to your S3 bucket properties.
-    -   Create an Event Notification for `All object create events` (`s3:ObjectCreated:*`).
-    -   Set the destination to the Lambda function you just deployed.
+The implementation uses these environment variables:
 
-5.  **Test the Pipeline**:
-    Upload a sample document (like `TheLeaderboard_illusion.pdf`) to your S3 bucket. Check the Lambda logs in CloudWatch to verify the sync job was triggered, and then query your Kendra index to confirm the document is searchable.
+```text
+KENDRA_INDEX_ID
+KENDRA_DATA_SOURCE_ID
+```
 
-## 🔒 Security & Compliance
+## AWS services used
 
--   **Least Privilege IAM**: The provided policy templates ensure that services only have the permissions strictly necessary to perform their functions.
--   **Data Encryption**: Ensure your S3 buckets and Kendra indexes are configured to use AWS KMS for data encryption at rest.
+- **Amazon S3** - document storage and event source
+- **AWS Lambda** - event-driven synchronization trigger
+- **Amazon Kendra** - enterprise search and indexing
+- **Amazon SageMaker AI** - included in the project workflow for GenAI document querying / experimentation
+- **AWS IAM** - service permissions and trust relationships
+- **Amazon CloudWatch** - Lambda operational logging
 
-## 📄 License
+## IAM and configuration files
 
-This project is licensed under the Apache 2.0 License.
+The repository contains the supplied policy/reference files used during the AWS setup:
 
-## 📞 Support
+- `LambdaRolePolicy.rtf`
+- `KendraRolePolicyAccess.rtf`
+- `KendraRolePolicyS3Access.rtf`
+- `AmazonSageMakerNotebooksServiceRolePolicy.rtf`
+- `TrustRelationShips/TrustPolicy.json`
 
-For any questions or issues, please open an issue on the [GitHub repository](https://github.com/mahek-genai/Enterprise-AI-Knowledge-Platform/issues).
+These files are retained as project reference material. Review and scope permissions according to the deployment environment rather than blindly applying broad permissions.
+
+## Project reference documents
+
+The repository also contains the documents used as knowledge-source examples and evaluation material:
+
+- `AI_FM_Reports.pdf`
+- `TheLeaderboard_illusion.pdf`
+- `ReaderAreTheLeaders.rtf`
+
+The included setup notes describe uploading selected documents to S3, creating the Lambda trigger, configuring Kendra Index/Data Source/DataSync, and using SageMaker AI Canvas for document querying. 
+
+## Setup outline
+
+### 1. Prepare AWS resources
+
+Create or identify:
+
+- An Amazon S3 bucket for source documents
+- An Amazon Kendra index
+- An S3-backed Kendra data source
+- An AWS Lambda function
+- Appropriate IAM roles and policies
+
+### 2. Configure Lambda
+
+Create a Python Lambda function and deploy `index.py`.
+
+Set:
+
+```text
+KENDRA_INDEX_ID=<your-kendra-index-id>
+KENDRA_DATA_SOURCE_ID=<your-kendra-data-source-id>
+```
+
+Attach an IAM execution role that permits the required Kendra operation and any required logging permissions.
+
+### 3. Configure the S3 trigger
+
+Create an S3 Object Created event notification and configure it to invoke the Lambda function.
+
+### 4. Configure Kendra
+
+Configure the Kendra index and S3 data source. The Lambda function starts synchronization when the S3 event occurs.
+
+### 5. Test
+
+Upload a supported document to the S3 data source and verify:
+
+1. S3 receives the document.
+2. Lambda is invoked.
+3. CloudWatch contains the Lambda execution logs.
+4. Kendra starts the data-source synchronization job.
+5. The document becomes searchable through the Kendra index.
+
+## Security notes
+
+- Do not commit AWS access keys, secret keys, passwords, or environment-specific credentials.
+- Replace placeholder resource identifiers with values from the target AWS account.
+- Prefer least-privilege IAM policies for production deployments.
+- Protect S3 data and Kendra indexes with appropriate encryption and access controls.
+- The policy files in this repository are reference material and should be reviewed before deployment.
+
+## Current project status
+
+The AWS infrastructure used for the original project setup may need to be recreated in a target AWS account before the workflow can be executed again. The repository preserves the implementation, configuration references, setup material, and sample knowledge documents needed to understand and reproduce the architecture.
+
+## Author
+
+**Mahek Shaikh**
+
+Generative AI Engineer | AWS | Amazon Bedrock | RAG
+
